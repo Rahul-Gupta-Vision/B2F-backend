@@ -1,0 +1,112 @@
+package com.example.B2F.service.fileService;
+
+import com.backblaze.b2.client.B2StorageClient;
+import com.backblaze.b2.client.contentSources.B2ContentSource;
+import com.backblaze.b2.client.contentSources.B2FileContentSource;
+import com.backblaze.b2.client.exceptions.B2Exception;
+import com.backblaze.b2.client.exceptions.B2UnauthorizedException;
+import com.backblaze.b2.client.structures.B2Bucket;
+import com.backblaze.b2.client.structures.B2FileVersion;
+import com.backblaze.b2.client.structures.B2UploadFileRequest;
+import com.example.B2F.entities.FileMetaData;
+import com.example.B2F.entities.User;
+import com.example.B2F.repository.FileRepository;
+import com.example.B2F.repository.UserRepository;
+import com.example.B2F.service.FileOperation;
+import com.example.B2F.wrappers.FileOPResponse;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.stereotype.Service;
+
+import java.io.InputStream;
+import java.time.Instant;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+@Service
+@RequiredArgsConstructor
+public class FileOperationImpl implements FileOperation {
+
+    @Value("${backblaze.bucketName}")
+    private String bucketName;
+
+    private final B2StorageClient b2StorageClient;
+    private final FileRepository fileRepository;
+    private final UserRepository userRepository;
+    @Override
+    public FileOPResponse uploadFile(String filename, InputStream inputStream, long contentLength, String contentType, String fileType) throws B2Exception, UsernameNotFoundException {
+        B2Bucket b2Bucket = b2StorageClient.getBucketOrNullByName(bucketName);
+        if(b2Bucket == null){
+            throw new IllegalStateException("Bucket Not found");
+        }
+        B2ContentSource source = new InputStreamB2ContentSource(inputStream, contentLength);
+        B2UploadFileRequest request = B2UploadFileRequest
+                                    .builder(b2Bucket.getBucketId(), filename, contentType, source).build();
+        B2FileVersion fileVersion = b2StorageClient.uploadSmallFile(request);
+        var user = getCurrentUser();
+        var fData = FileMetaData.builder()
+                .fileType(fileType)
+                .filename(filename)
+                .size(contentLength)
+                .uploader(user)
+                .b2FileId(fileVersion.getFileId())
+                .uploadedAt(Instant.now()).build();
+        fileRepository.save(fData);
+        return FileOPResponse.builder().fileId(fileVersion.getFileId()).fileName(filename).build();
+    }
+
+    @Override
+    public FileOPResponse deleteFile(String fileId) throws B2Exception {
+        var file  = fileRepository.findById(fileId);
+        if(file.isEmpty()){
+            return null;
+        }
+        String b2FileID = file.get().getB2FileId();
+        String fileName = file.get().getFilename();
+        b2StorageClient.deleteFileVersion(fileName, b2FileID);
+        fileRepository.deleteById(fileId);
+        return FileOPResponse.builder().fileName(fileName).fileId(b2FileID).build();
+    }
+
+    @Override
+    public FileOPResponse uploadLargeFile(String filename, InputStream inputStream, long contentLength, String contentType, String fileType) throws Exception {
+        B2Bucket b2Bucket = b2StorageClient.getBucketOrNullByName(bucketName);
+        if(b2Bucket == null){
+            throw new IllegalStateException("Bucket Not found");
+        }
+        B2ContentSource source = new InputStreamB2ContentSource(inputStream, contentLength);
+        ExecutorService executor = Executors.newFixedThreadPool(4);
+        B2UploadFileRequest request = B2UploadFileRequest
+                .builder(b2Bucket.getBucketId(), filename, contentType, source).build();
+        B2FileVersion fileVersion;
+        try {
+            fileVersion = b2StorageClient.uploadLargeFile(request, executor);
+        } finally {
+            executor.shutdown();
+        }
+        var user = getCurrentUser();
+        var fData = FileMetaData.builder()
+                .fileType(fileType)
+                .filename(filename)
+                .size(contentLength)
+                .uploader(user)
+                .b2FileId(fileVersion.getFileId())
+                .uploadedAt(Instant.now()).build();
+        fileRepository.save(fData);
+        return FileOPResponse.builder().fileId(fileVersion.getFileId()).fileName(filename).build();
+    }
+
+
+    private User getCurrentUser(){
+        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        if(principal instanceof UserDetails){
+            String userName = ((UserDetails) principal).getUsername();
+            return userRepository.findUserByUsername(userName).orElseThrow(()->new UsernameNotFoundException("Current User: User not found"));
+        }else {
+            throw new RuntimeException("Unauthorized user");
+        }
+    }
+}
