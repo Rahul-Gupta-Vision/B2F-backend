@@ -11,6 +11,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/B2F")
@@ -19,16 +22,14 @@ public class FileOperationController {
     private final FileOperation fileOperation;
 
     @PostMapping("/upload")
-    ResponseEntity<?>uploadFile(@RequestParam MultipartFile file) throws Exception {
-        String fileName = file.getOriginalFilename().split("\\.")[0];
-        String filetype = file.getOriginalFilename().split("\\.")[1];
-        FileOPResponse fileRes = null;
-        if(file.getSize() > 100){
-            fileRes = fileOperation.uploadLargeFile(fileName, file.getInputStream(), file.getSize(), file.getContentType(), filetype);
-        }else{
-            fileRes = fileOperation.uploadFile(fileName, file.getInputStream(), file.getSize(), file.getContentType(), filetype);
-        }
-        return new ResponseEntity<>(fileRes, HttpStatus.OK);
+    ResponseEntity<?>uploadFile(@RequestParam MultipartFile[] file) throws Exception {
+        List<CompletableFuture<FileOPResponse>> completableFutures = Arrays.stream(file)
+                .map(f->fileOperation.uploadFileAsync(f))
+                .toList();
+        List<FileOPResponse> responses = completableFutures.stream()
+                .map(CompletableFuture::join)
+                .toList();
+        return new ResponseEntity<>(responses, HttpStatus.OK);
     }
 
     @PreAuthorize("isAuthenticated()")

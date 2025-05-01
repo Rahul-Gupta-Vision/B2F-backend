@@ -16,13 +16,18 @@ import com.example.B2F.service.FileOperation;
 import com.example.B2F.wrappers.FileOPResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -77,7 +82,11 @@ public class FileOperationImpl implements FileOperation {
         if(b2Bucket == null){
             throw new IllegalStateException("Bucket Not found");
         }
-        B2ContentSource source = new InputStreamB2ContentSource(inputStream, contentLength);
+        File tempFile = File.createTempFile("b2f-upload-large",".tmp");
+        try(FileOutputStream fos = new FileOutputStream(tempFile)){
+            inputStream.transferTo(fos);
+        }
+        B2FileContentSource source = B2FileContentSource.builder(tempFile).build();
         ExecutorService executor = Executors.newFixedThreadPool(4);
         B2UploadFileRequest request = B2UploadFileRequest
                 .builder(b2Bucket.getBucketId(), filename, contentType, source).build();
@@ -86,6 +95,7 @@ public class FileOperationImpl implements FileOperation {
             fileVersion = b2StorageClient.uploadLargeFile(request, executor);
         } finally {
             executor.shutdown();
+            tempFile.delete();
         }
         var user = getCurrentUser();
         var fData = FileMetaData.builder()
@@ -98,6 +108,23 @@ public class FileOperationImpl implements FileOperation {
         fileRepository.save(fData);
         return FileOPResponse.builder().fileId(fileVersion.getFileId()).fileName(filename).build();
     }
+
+    @Async
+    @Override
+    public CompletableFuture<FileOPResponse> uploadFileAsync(MultipartFile file) {
+        try{
+            int idx = file.getOriginalFilename().lastIndexOf('.');
+            String fileName = file.getOriginalFilename().substring(0, idx);
+            String filetype = file.getOriginalFilename().substring(idx+1);
+            FileOPResponse response = (file.getSize() > 100 * 1024 * 1024)
+                    ? uploadLargeFile(fileName, file.getInputStream(), file.getSize(), file.getContentType(), filetype)
+                    : uploadFile(fileName, file.getInputStream(), file.getSize(), file.getContentType(), filetype);
+            return CompletableFuture.completedFuture(response);
+        }catch (Exception e){
+            throw new RuntimeException("Failed to Upload file: "+e.getMessage());
+        }
+    }
+
 
 
     private User getCurrentUser(){
