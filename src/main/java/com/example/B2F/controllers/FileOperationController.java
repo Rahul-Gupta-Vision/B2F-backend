@@ -41,4 +41,9 @@ public class FileOperationController {
         }
         return new ResponseEntity<>(res, HttpStatus.OK);
     }
+
+    @GetMapping("/files/{userId}")
+    ResponseEntity<?>getAllFiles(@PathVariable String userId) throws Exception{
+        return new ResponseEntity<>(fileOperation.getAllUploadedFiles(userId), HttpStatus.OK);
+    }
 }

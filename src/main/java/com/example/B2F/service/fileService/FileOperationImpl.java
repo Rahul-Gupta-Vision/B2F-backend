@@ -13,6 +13,7 @@ import com.example.B2F.entities.User;
 import com.example.B2F.repository.FileRepository;
 import com.example.B2F.repository.UserRepository;
 import com.example.B2F.service.FileOperation;
+import com.example.B2F.wrappers.FileDataResponse;
 import com.example.B2F.wrappers.FileOPResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,6 +28,12 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.TextStyle;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -125,15 +132,38 @@ public class FileOperationImpl implements FileOperation {
         }
     }
 
+    @Override
+    public List<FileDataResponse> getAllUploadedFiles(String userId) throws Exception {
+        User uploader = userRepository.findById(userId).orElseThrow();
+        List<FileMetaData> files = fileRepository.findByUploader(uploader);
+        List<FileDataResponse> responses = new ArrayList<>();
+        for(FileMetaData file:files){
+            responses.add(FileDataResponse.builder().file_size(String.valueOf(file.getSize()))
+                    .b2f_file_id(file.getB2FileId())
+                    .file_name(file.getFilename())
+                    .file_id(file.getId())
+                    .file_type(file.getFileType())
+                    .uploaded_time(convertInstantTimeToDateAndDay(file.getUploadedAt().toString())).build());
+        }
+        return responses;
+    }
 
 
     private User getCurrentUser(){
-        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        if(principal instanceof UserDetails){
-            String userName = ((UserDetails) principal).getUsername();
-            return userRepository.findUserByUsername(userName).orElseThrow(()->new UsernameNotFoundException("Current User: User not found"));
-        }else {
-            throw new RuntimeException("Unauthorized user");
-        }
+            Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+            if(principal instanceof UserDetails){
+                String userName = ((UserDetails) principal).getUsername();
+                return userRepository.findUserByUsername(userName).orElseThrow(()->new UsernameNotFoundException("Current User: User not found"));
+            }else {
+                throw new RuntimeException("Unauthorized user");
+            }
+    }
+
+    private String convertInstantTimeToDateAndDay(String time){
+        Instant instant = Instant.parse(time);
+        ZonedDateTime zonedDateTime = instant.atZone(ZoneId.systemDefault());
+        String date = zonedDateTime.toLocalDate().toString();
+        String day = zonedDateTime.getDayOfWeek().getDisplayName(TextStyle.FULL, Locale.ENGLISH);
+        return date+", "+day;
     }
 }
