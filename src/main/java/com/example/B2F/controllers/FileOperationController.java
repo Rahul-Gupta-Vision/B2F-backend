@@ -1,5 +1,6 @@
 package com.example.B2F.controllers;
 
+import com.example.B2F.config.JwtService;
 import com.example.B2F.service.FileOperation;
 import com.example.B2F.wrappers.FileOPResponse;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +21,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class FileOperationController {
     private final FileOperation fileOperation;
+    private final JwtService jwtService;
 
     @PostMapping("/upload")
     ResponseEntity<?>uploadFile(@RequestParam MultipartFile[] file) throws Exception {
@@ -42,8 +44,13 @@ public class FileOperationController {
         return new ResponseEntity<>(res, HttpStatus.OK);
     }
 
-    @GetMapping("/files/{userId}")
-    ResponseEntity<?>getAllFiles(@PathVariable String userId) throws Exception{
-        return new ResponseEntity<>(fileOperation.getAllUploadedFiles(userId), HttpStatus.OK);
+    @GetMapping("/files")
+    ResponseEntity<?>getAllFiles(@RequestHeader("Authorization") String header) throws Exception{
+        if(header == null || !header.startsWith("Bearer ")){
+            return new ResponseEntity<>("Invalid Token", HttpStatus.UNAUTHORIZED);
+        }
+        String jwtToken = header.substring(7);
+        String userEmail = jwtService.extractUsername(jwtToken);
+        return new ResponseEntity<>(fileOperation.getAllUploadedFiles(userEmail), HttpStatus.OK);
     }
 }

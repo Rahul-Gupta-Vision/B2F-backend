@@ -134,7 +134,7 @@ public class FileOperationImpl implements FileOperation {
 
     @Override
     public List<FileDataResponse> getAllUploadedFiles(String userId) throws Exception {
-        User uploader = userRepository.findById(userId).orElseThrow();
+        User uploader = userRepository.findUserByUsername(userId).orElseThrow();
         List<FileMetaData> files = fileRepository.findByUploader(uploader);
         List<FileDataResponse> responses = new ArrayList<>();
         for(FileMetaData file:files){
